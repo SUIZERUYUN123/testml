@@ -1,0 +1,58 @@
+#!/usr/bin/env testml-switch
+
+Diff = 1
+*input.undent.compile == *output
+
+
+=== Inline bridge section
+--- input(<)
+    *a.foo == *b
+
+    %Bridge bash
+
+    foo() {
+      echo orange
+    }
+
+
+
+    === Test 1
+    a: apple
+    b: orange
+
+--- output
+{ "testml": "0.3.0",
+  "code": [
+    ["%<>",["*a","*b"],
+      ["==",
+        [".",
+          ["*","a"],
+          ["foo"]],
+        ["*","b"]]]],
+  "data": [
+    { "Label": "Test 1",
+      "User": "a: apple\nb: orange\n"}],
+  "bridge": {
+    "bash": "foo() {\n  echo orange\n}\n"}}
+
+
+=== Inline bridge section with trailing comments
+--- input(<)
+    *a.foo == *b
+
+    %Bridge bash
+
+    foo() {
+      echo orange
+    }
+
+    # Comment
+
+    # Comment
+    === Test 1
+    a: apple
+    b: orange
+--- ^output
+
+
+# vim: ft=:

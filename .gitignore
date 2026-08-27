@@ -1,0 +1,15 @@
+.precomp/
+*.pyc
+.testml/
+*.swp
+
+/compiler/
+/eg/
+/ext/
+/note/
+/orphan/
+/runtime/
+/site/
+/src/node_modules/
+/talk/
+/testml/

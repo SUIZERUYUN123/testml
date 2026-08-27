@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+
+# echo ">>> Entering bin/testml
+# \$0 = $0
+# \$BASH_SOURCE = $BASH_SOURCE
+# \$TESTML_SOURCED = ${TESTML_SOURCED-}
+# -t 0 = $([[ -t 0 ]] && echo yes || echo no)
+# -t 1 = $([[ -t 1 ]] && echo yes || echo no)
+# <<<
+# " >&2
+
+# shellcheck disable=1090,2034,2154
+
+set -e -u -o pipefail
+
+export TESTML_VERSION='0.3.0'
+
+TESTML_ROOT=${TESTML_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+export TESTML_ROOT
+
+main() {
+  if is-meant-to-run-file "$@"; then
+    from_main=1 check-input-file "$@" ||
+      exec "$TESTML_INPUT" "$@"
+
+    set-testml-bin
+
+    source "$TESTML_BIN"
+
+    testml-run "$@"
+
+  else
+    run-cli "$@"
+  fi
+}
+
+is-meant-to-run-file() {
+  [[ $# == 1 && ! $1 =~ ^-. ]] &&
+  [[ -f $1 && -r $1 || $1 == - && -t 0 ]] &&
+    [[ $(read -r line < "$1" && echo "$line") =~ ^#!.*testml ]]
+}
+
+testml-run() {
+  testml_runner_sourced=true
+
+  export-testml-vars
+
+  if is-meant-to-run-file "$@"; then
+    check-input-file "$@"
+
+    set-testml-vars
+
+    compile-testml
+
+    set-testml-lib-vars
+
+    testml-run-file "$TESTML_AST"
+
+  else
+    run-cli "$@"
+  fi
+}
+
+run-cli() {
+  source "$TESTML_ROOT/bin/testml-cli.bash"
+
+  testml-run-cli "$@"
+}
+
+check-input-file() {
+  if [[ $1 != '-' ]]; then
+    [[ $# == 1 && $1 ]] ||
+      die "Can't determine testml source file"
+    [[ -e $1 ]] ||
+      die "TestML input file '$1' does not exist"
+  fi
+
+  if [[ ${from_main-} && $1 != - &&
+    $(head -n1 "$1") =~ \ (testml-[-a-z0-9]+) ]]; then
+    export TESTML_INPUT=${BASH_REMATCH[1]}
+    return 1
+  else
+    export TESTML_INPUT=$1
+    return 0
+  fi
+}
+
+set-testml-bin() {
+  local PATH=$TESTML_ROOT/bin:$PATH
+
+  if [[ ${TESTML_BIN-} ]]; then
+    can "$TESTML_BIN" ||
+      die "TESTML_BIN=$TESTML_BIN but '$TESTML_BIN' not found"
+    export TESTML_BIN=$can_path
+    return 0
+  fi
+
+  if [[ ${TESTML_RUN-} ]]; then
+    TESTML_BIN=testml-$TESTML_RUN
+    can "$TESTML_BIN" ||
+      die "TESTML_RUN=$TESTML_RUN but '$TESTML_BIN' not found"
+    export TESTML_RUN
+    export TESTML_BIN=$can_path
+    return 0
+  fi
+
+  die "
+Can't determine TestML runner binary to use.
+Try setting TESTML_RUN or TESTML_BIN.
+See 'testml --list' for a list of runners.
+"
+}
+
+set-testml-vars() {
+  TESTML_DIR=$(cd "$(dirname "$TESTML_INPUT")" && pwd)
+  export TESTML_DIR
+  TESTML_FILENAME=$(basename "$TESTML_INPUT")
+  export TESTML_FILENAME
+
+  if [[ $TESTML_INPUT == '-' ]]; then
+    export TESTML_FILE='-'
+  else
+    export TESTML_FILE=$TESTML_DIR/$TESTML_FILENAME
+  fi
+
+  source-testml-config
+
+  [[ ${TESTML_CACHE-} ]] ||
+    TESTML_CACHE=$(abs-dir-path "$TESTML_INPUT")/.testml
+  export TESTML_CACHE
+  export TESTML_AST=$TESTML_CACHE/$TESTML_FILENAME.lingy
+}
+
+source-testml-config() {
+  if [[ -z ${TESTML_CONFIG-} ]]; then
+    if [[ -e ${TESTML_DIR-}/.testmlrc ]]; then
+      TESTML_CONFIG=$TESTML_DIR/.testmlrc
+    fi
+  fi
+
+  [[ ${TESTML_CONFIG-} ]] || return 0
+
+  [[ -f $TESTML_CONFIG ]] ||
+    die "TestML config file '$TESTML_CONFIG' does not exist"
+
+  source "$TESTML_CONFIG"
+
+  export-testml-vars
+}
+
+export-testml-vars() {
+  : "${TESTML_LANG_BIN:=${TESTML_LANG-}}"
+
+  export TESTML_{BIN,BRIDGE,LANG{,_BIN},LIB,MODULE,PATH,RUN}
+}
+
+set-testml-lib-vars() {
+  TESTML_LIB=${TESTML_LIB:+$TESTML_LIB:}$TESTML_DIR
+
+  if [[ ${TESTML_LANG-} == raku ]]; then
+    TESTML_LIB=${TESTML_LIB//:/,}
+  fi
+
+  export TESTML_LIB
+
+  if [[ ${TESTML_LANG+x} ]]; then
+    export TESTML_ROOT_LIB=$TESTML_ROOT/src/$TESTML_LANG/lib
+  fi
+}
+
+compile-testml() {
+  local ast rc
+
+  [[ $TESTML_INPUT == '-' || -e $TESTML_AST && ! -s $TESTML_AST ]] &&
+    rm -f "$TESTML_AST"
+  [[ $TESTML_AST -nt $TESTML_FILE ]] &&
+    return 0
+
+  : "${TESTML_COMPILER_BIN:=testml-compiler}"
+
+  rc=0
+  ast=$(
+    if [[ ${testml_eval_input-} ]]; then
+      echo "$testml_eval_input" | "${TESTML_COMPILER_BIN}" -
+    else
+      "${TESTML_COMPILER_BIN}" "$TESTML_FILE"
+    fi
+  ) || rc=$?
+
+  if [[ $TESTML_AST ]]; then
+    mkdir -p "$TESTML_CACHE"
+    echo -n "$ast" > "$TESTML_AST"
+  else
+    echo "$ast"
+  fi
+
+  return $rc
+}
+
+is-tty() {
+  [[ -t 1 ]]
+}
+
+can() {
+  can_path=$(command -v "$1") || return $?
+}
+
+abs-dir-path() {
+  [[ $1 != '-' ]] || { pwd; return; }
+  [[ -f $1 ]] || die "'$1' is not a file"
+  local file_path=$1
+  local file_name=
+  file_name=$(basename "$1")
+  local file_dir=
+  file_dir=$(cd "$(dirname -- "$1")" && (pwd -P 2>/dev/null || pwd))
+  (
+    cd "$file_dir"
+    link=$(readlink -- "$file_name")
+    if [[ $link ]]; then
+      cd "$(dirname -- "$link")"
+    fi
+    pwd -P 2>/dev/null || pwd
+  )
+}
+
+die() {
+  if [[ $# -eq 0 ]]; then
+    echo "Died" >&2
+  else
+    echo "$*" >&2
+  fi
+  exit 1
+}
+
+TESTML_SOURCED=true
+
+[[ $0 != "${BASH_SOURCE[0]}" ]] || main "$@"
+
+# vim: ft=sh sw=2 lisp:

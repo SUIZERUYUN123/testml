@@ -1,0 +1,80 @@
+#!/usr/bin/env testml-switch
+
+Diff = 1
+*input.undent.compile(*import.undent) == *output
+*input.undent.compile.Catch ~~ *error
+
+=== Import code then Import data
+--- input
+    %Import code
+    *a.x == *b
+    %Import data
+
+--- import
+    +++ code.tml
+    foo = 123
+    +++ data.tml
+    === Test 1
+    --- a: 1
+    --- b: 2
+
+--- output
+{ "testml": "0.3.0",
+  "code": [
+    ["=","foo",123],
+    ["%<>",["*a","*b"],
+      ["==",
+        [".",
+          ["*","a"],
+          ["x"]],
+        ["*","b"]]]],
+  "data": [
+    { "Label": "Test 1",
+      "a": 1,
+      "b": 2,
+      "Name": "data"}]}
+
+=== Import multiple files at once
+--- input
+    *a.x == *b
+
+    %Import data1 data2 data3
+
+--- import
+    +++ data1.tml
+    === Test 1
+    --- a: 1
+    --- b: 2
+    +++ data2.tml
+    === Test 2
+    --- a: 3
+    --- b: 4
+    +++ data3.tml
+    === Test 3
+    --- a: 5
+    --- b: 6
+
+--- output
+{ "testml": "0.3.0",
+  "code": [
+    ["%<>",["*a","*b"],
+      ["==",
+        [".",
+          ["*","a"],
+          ["x"]],
+        ["*","b"]]]],
+  "data": [
+    { "Label": "Test 1",
+      "a": 1,
+      "b": 2,
+      "Name": "data1"},
+    { "Label": "Test 2",
+      "a": 3,
+      "b": 4,
+      "Name": "data2"},
+    { "Label": "Test 3",
+      "a": 5,
+      "b": 6,
+      "Name": "data3"}]}
+
+# vim: ft=:

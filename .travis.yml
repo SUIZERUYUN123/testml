@@ -1,0 +1,31 @@
+language: node_js
+
+node_js: [node]
+
+branches: {only: [master, travis]}
+
+env:
+  global:
+  - export GOROOT=/usr/local/go
+  - export PATH="/usr/local/go/bin:/opt/rakudo-pkg/bin:/opt/rakudo-pkg/share/raku/site/bin:$PATH"
+addons:
+  apt:
+    sources:
+    - sourceline: 'deb https://dl.bintray.com/nxadm/rakudo-pkg-debs $(lsb_release -cs) main'
+      key_url: 'http://keyserver.ubuntu.com/pks/lookup?search=0x379CE192D401AB61&op=get'
+    packages:
+    - figlet
+    - python
+    - python3
+    - rakudo-pkg    # Perl 6
+
+install:
+- wget --quiet https://dl.google.com/go/go1.11.linux-amd64.tar.gz
+- tar xzf go1.11.linux-amd64.tar.gz
+- sudo mv go /usr/local/
+
+script:
+- git fetch --unshallow
+- git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+- git fetch origin
+- make test-travis
